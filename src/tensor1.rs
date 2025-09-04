@@ -34,7 +34,7 @@ impl MemoryOrdo1 {
     }
 }
 
-struct  arr1_to_tensor {
+pub struct arr1_to_tensor {
     memory: MemoryOrdo1,
     data_array1: Vec<Array1<f32>>,
     data_array1_fix: Vec<Array1<f32>>,
@@ -43,7 +43,31 @@ struct  arr1_to_tensor {
 }
 
 impl arr1_to_tensor {
-    fn init (array:Vec<Array1<f32>>) -> Self {
+
+    pub fn new() -> Self{
+        Self { memory: MemoryOrdo1::init(),
+            data_array1: Vec::new(),
+            data_array1_fix: Vec::new(),
+            data_array2_fix: Array2::zeros((0,0)),
+            true_index: Vec::new() }
+    }
+
+    pub fn push (& mut self, array : Array1<f32>) {
+        self.data_array1.push(array);
+    }
+
+    pub fn init(self, array: Option<Vec<Array1<f32>>>) {
+        match array {
+            Some(arr) => {
+                arr1_to_tensor::sorting(arr);
+            }
+            None => {
+                arr1_to_tensor::sorting(self.data_array1);
+            }
+        }
+    }
+
+    fn sorting (array : Vec<Array1<f32>>) -> Self {
         let mut memory = MemoryOrdo1::init();
         let mut indexed: Vec<(usize, Array1<f32>)> = array
             .into_iter()
@@ -66,7 +90,7 @@ impl arr1_to_tensor {
         }
     }
 
-    fn count (&mut self) {
+    pub fn count (&mut self) {
         let first_shape = self.data_array1[0].shape();
         let all_equal = self.data_array1.iter().all(|a| a.shape() == first_shape);
         if all_equal{self.stacking()} else {self.packing();}
@@ -117,28 +141,41 @@ impl arr1_to_tensor {
         self.data_array1 = Vec::new()
     }
 
-    fn to_tensor2 (&mut self){
+    pub fn to_tensor2 (&mut self){
         let views: Vec<_> = self.data_array1_fix.iter().map(|a| a.view()).collect();
         self.data_array2_fix = stack(Axis(0), &views).unwrap();
         self.data_array1_fix = Vec::new();
+        self.true_index = Vec::new();
     }
 
-    fn get(&mut self, index: usize) -> ArrayViewMut1<f32> {
+    pub fn get(&mut self, index: usize) -> ArrayViewMut1<f32> {
         let (x1, x2, z) = self.memory
             .get(index)
             .expect(&format!("Invalid index {} in arr1_to_tensor::get", index));
         self.data_array2_fix.slice_mut(s![z, x1..=x2])
     }
 
-    fn dim(&self, index: usize) -> usize {
+    pub fn dim(&self, index: usize) -> usize {
         let (x1, x2, _) = self.memory
             .get(index)
             .expect(&format!("Invalid index {} in arr1_to_tensor::dim", index));
         x2 - x1 + 1
     }
 
-    fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.memory.coords.len()
+    }
+
+    pub fn export (self) -> (Array2<f32>, MemoryOrdo1) {
+        (self.data_array2_fix, self.memory)
+    }
+
+    pub fn import (array : Array2<f32>, memory: MemoryOrdo1) -> Self {
+        Self { memory: memory,
+            data_array1: Vec::new(),
+            data_array1_fix: Vec::new(),
+            data_array2_fix: array,
+            true_index: Vec::new() }
     }
 
 }
