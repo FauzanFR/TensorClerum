@@ -1,5 +1,4 @@
 use ndarray::{s, stack, Array3, Array4, ArrayView3, ArrayViewMut3, Axis};
-use std::cmp::Ordering;
 
 #[derive(Debug, Clone, Copy)]
 struct BoundingBox {
