@@ -32,6 +32,7 @@ impl BoundingBox {
     }
 }
 
+#[derive(Clone)]
 struct OctreeNode {
     bounds: BoundingBox,
     children: Option<[Box<OctreeNode>; 8]>,
@@ -111,6 +112,7 @@ impl OctreeNode {
     }
 }
 
+#[derive(Clone)]
 struct Tensor3Metadata {
     x_max: usize,
     x_min: usize,
@@ -190,6 +192,12 @@ pub struct PackedTensor3DStorage {
     metadata: Tensor3Metadata
 }
 
+pub struct PackedTensor3DRef<'a> {
+    data: &'a Array4<f32>, 
+    metadata: &'a Tensor3Metadata
+}
+
+#[derive(Clone)]
 pub struct PackedTensor3D {
     metadata: Tensor3Metadata,
     data_array3: Vec<Array3<f32>>,
@@ -376,10 +384,24 @@ impl PackedTensor3D {
         self.metadata.print();
     }
 
-    pub fn export(self) -> PackedTensor3DStorage {
+    pub fn as_view(&self) -> PackedTensor3DRef<'_> {
+        PackedTensor3DRef {
+            data: &self.data_array4,
+            metadata: &self.metadata,
+        }
+    }
+
+    pub fn export(&self) -> PackedTensor3DStorage {
         PackedTensor3DStorage {
-            data: self.data_array4, 
-            metadata: self.metadata
+            data: self.data_array4.clone(), 
+            metadata: self.metadata.clone()
+        }
+    }
+
+    pub fn into_storage(self) -> PackedTensor3DStorage {
+        PackedTensor3DStorage {
+            data: self.data_array4,
+            metadata: self.metadata,
         }
     }
 
@@ -389,6 +411,90 @@ impl PackedTensor3D {
             data_array3: Vec::new(),
             data_array4: data.data,
             true_index: Vec::new(),
+        }
+    }
+
+    pub fn iter(&self) -> PackedTensor3DIter<'_> {
+        PackedTensor3DIter {
+            packed_tensor: self,
+            index: 0,
+        }
+    }
+
+    pub fn iter_mut(&mut self) -> PackedTensor3DIterMut<'_> {
+        PackedTensor3DIterMut {
+            packed_tensor: self,
+            index: 0,
+        }
+    }
+
+    pub fn into_iter(self) -> PackedTensor3DIntoIter {
+        PackedTensor3DIntoIter {
+            packed_tensor: self,
+            index: 0,
+        }
+    }
+}
+
+pub struct PackedTensor3DIter<'a> {
+    packed_tensor: &'a PackedTensor3D,
+    index: usize,
+}
+
+impl<'a> Iterator for PackedTensor3DIter<'a> {
+    type Item = ArrayView3<'a, f32>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.packed_tensor.len() {
+            let result = self.packed_tensor.get(self.index);
+            self.index += 1;
+            Some(result)
+        } else {
+            None
+        }
+    }
+}
+
+pub struct PackedTensor3DIterMut<'a> {
+    packed_tensor: &'a mut PackedTensor3D,
+    index: usize,
+}
+
+impl<'a> Iterator for PackedTensor3DIterMut<'a> {
+    type Item = (usize, ArrayViewMut3<'a, f32>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.packed_tensor.len() {
+            let index = self.index;
+            let result = {
+                let ptr = self.packed_tensor as *mut PackedTensor3D;
+                unsafe {
+                    (&mut *ptr).get_mut(index)
+                }
+            };
+            self.index += 1;
+            Some((index, result))
+        } else {
+            None
+        }
+    }
+}
+
+pub struct PackedTensor3DIntoIter {
+    packed_tensor: PackedTensor3D,
+    index: usize,
+}
+
+impl Iterator for PackedTensor3DIntoIter {
+    type Item = Array3<f32>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.packed_tensor.len() {
+            let result = self.packed_tensor.get(self.index).to_owned();
+            self.index += 1;
+            Some(result)
+        } else {
+            None
         }
     }
 }

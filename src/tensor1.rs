@@ -1,5 +1,5 @@
 use ndarray::{s, stack, Array1, Array2, ArrayView1, ArrayViewMut1, Axis};
-
+#[derive(Clone)]
 struct Tensor1Metadata {
     x_max: usize,
     x_min: usize,
@@ -36,6 +36,12 @@ pub struct PackedTensor1DStorage {
     metadata:Tensor1Metadata
 }
 
+pub struct PackedTensor2DRef<'a> {
+    pub data: &'a Array2<f32>,
+    pub metadata: &'a Tensor1Metadata,
+}
+
+#[derive(Clone)]
 pub struct PackedTensor1D {
     metadata: Tensor1Metadata,
     data_array1: Vec<Array1<f32>>,
@@ -153,7 +159,7 @@ impl PackedTensor1D {
         self.true_index = Vec::new();
     }
 
-    pub fn get(&mut self, index: usize) -> ArrayView1<f32> {
+    pub fn get(&self, index: usize) -> ArrayView1<f32> {
         let (x1, x2, z) = self.metadata
             .get_coords(index)
             .expect(&format!("Invalid index {} in PackedTensor1D::get", index));
@@ -182,14 +188,116 @@ impl PackedTensor1D {
         self.metadata.print();
     }
 
-    pub fn export (self) -> PackedTensor1DStorage {
-        PackedTensor1DStorage{data: self.data_array2, metadata: self.metadata}
+    pub fn as_view(&self) -> PackedTensor2DRef<'_> {
+        PackedTensor2DRef {
+            data: &self.data_array2,
+            metadata: &self.metadata,
+        }
+    }
+
+    pub fn export (&self) -> PackedTensor1DStorage {
+        PackedTensor1DStorage{
+            data: self.data_array2.clone(),
+            metadata: self.metadata.clone()}
+    }
+
+    pub fn into_storage(self) -> PackedTensor1DStorage {
+        PackedTensor1DStorage {
+            data: self.data_array2,
+            metadata: self.metadata,
+        }
     }
 
     pub fn import (data:PackedTensor1DStorage) -> Self {
-        Self { metadata: data.metadata,
+        Self {
+            metadata: data.metadata,
             data_array1: Vec::new(),
             data_array2: data.data,
-            true_index: Vec::new() }
+            true_index: Vec::new()
+        }
+    }
+
+    pub fn iter(&self) -> PackedTensor1DIter<'_> {
+        PackedTensor1DIter {
+            packed_tensor: self,
+            index: 0,
+        }
+    }
+
+    pub fn iter_mut(&mut self) -> PackedTensor1DIterMut<'_> {
+        PackedTensor1DIterMut {
+            packed_tensor: self,
+            index: 0,
+        }
+    }
+
+    pub fn into_iter(self) -> PackedTensor1DIntoIter {
+        PackedTensor1DIntoIter {
+            packed_tensor: self,
+            index: 0,
+        }
+    }
+}
+
+pub struct PackedTensor1DIter<'a> {
+    packed_tensor: &'a PackedTensor1D,
+    index: usize,
+}
+
+impl<'a> Iterator for PackedTensor1DIter<'a> {
+    type Item = ArrayView1<'a, f32>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.packed_tensor.len() {
+            let result = self.packed_tensor.get(self.index);
+            self.index += 1;
+            Some(result)
+        } else {
+            None
+        }
+    }
+}
+
+pub struct PackedTensor1DIterMut<'a> {
+    packed_tensor: &'a mut PackedTensor1D,
+    index: usize,
+}
+
+impl<'a> Iterator for PackedTensor1DIterMut<'a> {
+    type Item = (usize, ArrayViewMut1<'a, f32>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.packed_tensor.len() {
+            let index = self.index;
+            let result = {
+                let ptr = self.packed_tensor as *mut PackedTensor1D;
+                unsafe {
+                    (&mut *ptr).get_mut(index)
+                }
+            };
+            self.index += 1;
+            Some((index, result))
+        } else {
+            None
+        }
+    }
+}
+
+pub struct PackedTensor1DIntoIter {
+    packed_tensor: PackedTensor1D,
+    index: usize,
+}
+
+impl Iterator for PackedTensor1DIntoIter {
+    type Item = Array1<f32>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.packed_tensor.len() {
+            let result = self.packed_tensor.get(self.index).to_owned();
+            self.index += 1;
+            Some(result)
+        } else {
+            None
+        }
     }
 }

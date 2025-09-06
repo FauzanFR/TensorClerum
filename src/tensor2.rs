@@ -176,7 +176,7 @@ impl MaxRectsBin {
     }
 }
 
-
+#[derive(Clone)]
 struct Tensor2Metadata {
     x_max: usize,
     x_min: usize,
@@ -189,6 +189,12 @@ pub struct PackedTensor2DStorage {
     data: Array3<f32>, 
     metadata:Tensor2Metadata
 }
+
+pub struct PackedTensor2DRef<'a> {
+    pub data: &'a Array3<f32>,
+    pub metadata: &'a Tensor2Metadata,
+}
+
 
 impl Tensor2Metadata {
     fn init() -> Self {
@@ -227,6 +233,7 @@ impl Tensor2Metadata {
     }
 }
 
+#[derive(Clone)]
 pub struct PackedTensor2D {
     metadata: Tensor2Metadata,
     data_array2: Vec<Array2<f32>>,
@@ -367,7 +374,7 @@ impl PackedTensor2D {
         self.true_index = Vec::new();
     }
 
-    pub fn get(&mut self, index: usize) -> ArrayView2<f32> {
+    pub fn get(&self, index: usize) -> ArrayView2<f32> {
         let (x1, x2, y1, y2, z) = self.metadata
             .get(index)
             .expect(&format!("Invalid index {} in PackedTensor2D::get", index));
@@ -377,11 +384,11 @@ impl PackedTensor2D {
     pub fn get_mut(&mut self, index: usize) -> ArrayViewMut2<f32> {
         let (x1, x2, y1, y2, z) = self.metadata
             .get(index)
-            .expect(&format!("Invalid index {} in PackedTensor2D::get", index));
+            .expect(&format!("Invalid index {} in PackedTensor2D::get_mut", index));
         self.data_array3.slice_mut(s![z, x1..=x2, y1..=y2])
     }
 
-    pub fn dim (&mut self, index: usize) -> (usize, usize) {
+    pub fn dim (&self, index: usize) -> (usize, usize) {
         let (x1, x2, y1, y2, _) = self.metadata
             .get(index)
             .expect(&format!("Invalid index {} in PackedTensor2D::dim", index));
@@ -396,15 +403,118 @@ impl PackedTensor2D {
         self.metadata.print();
     }
 
-    pub fn export (self) -> PackedTensor2DStorage {
-        PackedTensor2DStorage{data: self.data_array3, metadata: self.metadata}
+    pub fn as_view(&self) -> PackedTensor2DRef<'_> {
+        PackedTensor2DRef {
+            data: &self.data_array3,
+            metadata: &self.metadata,
+        }
+    }
+
+    pub fn export(&self) -> PackedTensor2DStorage {
+        PackedTensor2DStorage {
+            data: self.data_array3.clone(),
+            metadata: self.metadata.clone(),
+        }
+    }
+
+    pub fn into_storage(self) -> PackedTensor2DStorage {
+        PackedTensor2DStorage {
+            data: self.data_array3,
+            metadata: self.metadata,
+        }
     }
 
     pub fn import (data:PackedTensor2DStorage) -> Self {
-        Self { metadata: data.metadata,
+        Self {
+            metadata: data.metadata,
             data_array2: Vec::new(),
             data_array3: data.data,
-            true_index: Vec::new() }
+            true_index: Vec::new()
+        }
     }
 
+    pub fn iter(&self) -> PackedTensor2DIter<'_> {
+        PackedTensor2DIter {
+            packed_tensor: self,
+            index: 0,
+        }
+    }
+
+    pub fn iter_mut(&mut self) -> PackedTensor2DIterMut<'_> {
+        PackedTensor2DIterMut {
+            packed_tensor: self,
+            index: 0,
+        }
+    }
+
+    pub fn into_iter(self) -> PackedTensor2DIntoIter {
+        PackedTensor2DIntoIter {
+            packed_tensor: self,
+            index: 0,
+        }
+    }
+}
+
+
+pub struct PackedTensor2DIter<'a> {
+    packed_tensor: &'a PackedTensor2D,
+    index: usize,
+}
+
+impl<'a> Iterator for PackedTensor2DIter<'a> {
+    type Item = ArrayView2<'a, f32>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.packed_tensor.len() {
+            let result = self.packed_tensor.get(self.index);
+            self.index += 1;
+            Some(result)
+        } else {
+            None
+        }
+    }
+}
+
+pub struct PackedTensor2DIterMut<'a> {
+    packed_tensor: &'a mut PackedTensor2D,
+    index: usize,
+}
+
+impl<'a> Iterator for PackedTensor2DIterMut<'a> {
+    type Item = (usize, ArrayViewMut2<'a, f32>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.packed_tensor.len() {
+            let index = self.index;
+            let result = {
+                let ptr = self.packed_tensor as *mut PackedTensor2D;
+                unsafe {
+                    (&mut *ptr).get_mut(index)
+                }
+            };
+            self.index += 1;
+            Some((index, result))
+        } else {
+            None
+        }
+    }
+}
+
+pub struct PackedTensor2DIntoIter {
+    packed_tensor: PackedTensor2D,
+    index: usize,
+}
+
+impl Iterator for PackedTensor2DIntoIter {
+    type Item = Array2<f32>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.packed_tensor.len() {
+            let result = self.packed_tensor.get(self.index).to_owned();
+            self.index += 1;
+            Some(result)
+        } else {
+            None
+        }
+    }
 }
