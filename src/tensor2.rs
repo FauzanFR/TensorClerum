@@ -1,26 +1,7 @@
 use std::fs::File;
 use bincode;
 
-use ndarray::{s, stack, Array2, Array3, ArrayViewMut2, Axis};
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize, Deserialize, Clone)]
-struct ckpt_tensor3 {
-    array: Array3<f32>,
-    coords: Vec<(usize, usize, usize, usize, usize, usize)>,
-    x_max: usize,
-    y_max: usize,
-}
-
-fn save_checkpoint(path: &str, clr: &ckpt_tensor3) -> std::io::Result<()> {
-    let file = File::create(path)?;
-    bincode::serialize_into(file, clr).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-}
-
-fn load_checkpoint(path: &str) -> std::io::Result<ckpt_tensor3> {
-    let file = File::open(path)?;
-    bincode::deserialize_from(file).map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-}
+use ndarray::{s, stack, Array2, Array3, ArrayView2, ArrayViewMut2, Axis};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Rect {
@@ -198,17 +179,27 @@ impl MaxRectsBin {
     }
 }
 
-struct MemoryOrdo2 {
+
+struct Tensor2Metadata {
     x_max: usize,
+    x_min: usize,
     y_max: usize,
+    y_min: usize,
     coords: Vec<(usize, usize, usize, usize, usize, usize)>,
 }
 
-impl MemoryOrdo2 {
+pub struct PackedTensor2DStorage {
+    data: Array3<f32>, 
+    metadata:Tensor2Metadata
+}
+
+impl Tensor2Metadata {
     fn init() -> Self {
         Self {
             x_max: 0,
+            x_min: usize::MAX,
             y_max: 0,
+            y_min: usize::MAX,
             coords: Vec::new(),
         }
     }
@@ -222,7 +213,9 @@ impl MemoryOrdo2 {
 
     fn print(&self) {
         println!("x_max: {:?}", self.x_max);
+        println!("x_min: {:?}", self.x_min);
         println!("y_max: {:?}", self.y_max);
+        println!("y_min: {:?}", self.y_min);
         for (i, j, k, l, m, n) in &self.coords {
             println!("index: {} | {} ~ {}, {} ~ {} | layer: {}", i, j, k, l, m, n);
         }
@@ -237,24 +230,51 @@ impl MemoryOrdo2 {
     }
 }
 
-pub struct arr2_to_tensor {
-    memory: MemoryOrdo2,
+pub struct PackedTensor2D {
+    metadata: Tensor2Metadata,
     data_array2: Vec<Array2<f32>>,
-    data_array2_fix: Vec<Array2<f32>>,
-    data_array3_fix: Array3<f32>,
+    data_array3: Array3<f32>,
     true_index: Vec<usize>,
 }
 
-impl arr2_to_tensor {
-    pub fn init(array: Vec<Array2<f32>>) -> Self {
-        let mut memory = MemoryOrdo2::init();
+impl PackedTensor2D {
+
+    pub fn from_vec(array: Vec<Array2<f32>>) -> Self{
+        Self { metadata: Tensor2Metadata::init(),
+            data_array2: array,
+            data_array3: Array3::zeros((0,0,0)),
+            true_index: Vec::new() }
+    }
+
+    pub fn new() -> Self{
+        Self { metadata: Tensor2Metadata::init(),
+            data_array2: Vec::new(),
+            data_array3: Array3::zeros((0,0,0)),
+            true_index: Vec::new() }
+    }
+
+    pub fn push (& mut self, array : Array2<f32>) {
+        self.data_array2.push(array);
+    }
+
+    pub fn process (&mut self) {
+        let array = std::mem::take(&mut self.data_array2);
+        (self.metadata,self.data_array2, self.data_array3, self.true_index) = PackedTensor2D::sorting(array);
+        self.count();
+        self.to_tensor();
+    }
+
+    fn sorting(array: Vec<Array2<f32>>) -> (Tensor2Metadata, Vec<Array2<f32>>, Array3<f32>, Vec<usize>) {
+        let mut metadata = Tensor2Metadata::init();
         let mut indexed: Vec<(usize, Array2<f32>)> = array
             .into_iter()
             .enumerate()
             .map(|(i, arr)| {
-                let (x, y) = (arr.shape()[0], arr.shape()[1]);
-                memory.x_max = memory.x_max.max(x);
-                memory.y_max = memory.y_max.max(y);
+                let (x, y) = arr.dim();
+                metadata.x_max = metadata.x_max.max(x);
+                metadata.x_min = metadata.x_min.min(x);
+                metadata.y_max = metadata.y_max.max(y);
+                metadata.y_min = metadata.y_min.min(y);
                 (i, arr)
             })
             .collect();
@@ -262,18 +282,18 @@ impl arr2_to_tensor {
         indexed.sort_by_key(|(_, v)| -(v.shape()[0] as isize * v.shape()[1] as isize));
         let (true_index, data_array2) = indexed.into_iter().unzip();
 
-        Self {
-            memory,
+        (
+            metadata,
             data_array2,
-            data_array2_fix: Vec::new(),
-            data_array3_fix: Array3::zeros((1, 1, 1)),
+            Array3::zeros((0,0,0)),
             true_index,
-        }
+        )
     }
 
-    pub fn count(&mut self) {
-        let first_shape = self.data_array2[0].shape();
-        let all_equal = self.data_array2.iter().all(|a| a.shape() == first_shape);
+    fn count (&mut self) {
+        let all_equal =
+            (self.metadata.x_max / self.metadata.x_min) < 2 ||
+            (self.metadata.y_max / self.metadata.y_min) < 2;
         if all_equal{self.stacking()} else {self.packing();}
     }
     
@@ -282,14 +302,20 @@ impl arr2_to_tensor {
         let remaining: Vec<(usize, &Array2<f32>)> = self.data_array2.iter().enumerate().collect();
 
         for &(idx, arr) in &remaining {
-            let mut layer = self.memory.make_layer();
-            self.memory.coords.push((self.true_index[idx], 0, 0 + self.memory.x_max - 1, 0, 0 + self.memory.y_max - 1, idx));
-            layer.assign(arr);
+            let (x, y) = arr.dim();
+            let mut layer = self.metadata.make_layer();
+            
+            self.metadata.coords.push((
+                self.true_index[idx],
+                0, 0 + x - 1,
+                0, 0 + y - 1,
+                idx
+            ));
+
+            layer.slice_mut(s![0..x, 0..y]).assign(arr);
             layers.push(layer);
         }
-        self.data_array2_fix = layers;
-        self.memory.print();
-        self.data_array2 = Vec::new();
+        self.data_array2 = layers;
     }
 
     fn packing(&mut self){
@@ -309,7 +335,7 @@ impl arr2_to_tensor {
                 for (layer_id, (layer, bin)) in layers.iter_mut().zip(max_rects_bins.iter_mut()).enumerate() {
                     if let Some((x, y)) = bin.insert(&rect) {
                         layer.slice_mut(s![y..y + n1, x..x + n2]).assign(arr);
-                        self.memory.coords.push((self.true_index[idx], x, x + n2 - 1, y, y + n1 - 1, layer_id));
+                        self.metadata.coords.push((self.true_index[idx], x, x + n2 - 1, y, y + n1 - 1, layer_id));
                         placed_idx.push(idx);
                         placed = true;
                         break;
@@ -317,12 +343,12 @@ impl arr2_to_tensor {
                 }
 
                 if !placed {
-                    let mut new_layer = self.memory.make_layer();
-                    let mut new_bin = self.memory.make_max_rects_bin();
+                    let mut new_layer = self.metadata.make_layer();
+                    let mut new_bin = self.metadata.make_max_rects_bin();
                     
                     if let Some((x, y)) = new_bin.insert(&rect) {
                         new_layer.slice_mut(s![y..y + n1, x..x + n2]).assign(arr);
-                        self.memory.coords.push((self.true_index[idx], x, x + n2 - 1, y, y + n1 - 1, layers.len()));
+                        self.metadata.coords.push((self.true_index[idx], x, x + n2 - 1, y, y + n1 - 1, layers.len()));
                         layers.push(new_layer);
                         max_rects_bins.push(new_bin);
                         placed_idx.push(idx);
@@ -334,57 +360,54 @@ impl arr2_to_tensor {
 
             remaining.retain(|(idx, _)| !placed_idx.contains(idx));
         }
+        self.data_array2 = layers;
+    }
 
-        self.memory.print();
-        self.data_array2_fix = layers;
+    fn to_tensor (&mut self) {
+        let views: Vec<_> = self.data_array2.iter().map(|a| a.view()).collect();
+        self.data_array3 = stack(Axis(0), &views).unwrap();
         self.data_array2 = Vec::new();
+        self.true_index = Vec::new();
     }
 
-    pub fn to_tensor3(&mut self) {
-        let views: Vec<_> = self.data_array2_fix.iter().map(|a| a.view()).collect();
-        self.data_array3_fix = stack(Axis(0), &views).unwrap();
-        self.data_array2_fix = Vec::new();
-    }
-
-    pub fn get(&mut self, index: usize) -> ArrayViewMut2<f32> {
-        let (x1, x2, y1, y2, z) = self.memory
+    pub fn get(&mut self, index: usize) -> ArrayView2<f32> {
+        let (x1, x2, y1, y2, z) = self.metadata
             .get(index)
-            .expect(&format!("Invalid index {} in arr2_to_tensor::get", index));
-        self.data_array3_fix.slice_mut(s![z, x1..=x2, y1..=y2])
+            .expect(&format!("Invalid index {} in PackedTensor2D::get", index));
+        self.data_array3.slice(s![z, x1..=x2, y1..=y2])
+    }
+
+    pub fn get_mut(&mut self, index: usize) -> ArrayViewMut2<f32> {
+        let (x1, x2, y1, y2, z) = self.metadata
+            .get(index)
+            .expect(&format!("Invalid index {} in PackedTensor2D::get", index));
+        self.data_array3.slice_mut(s![z, x1..=x2, y1..=y2])
     }
 
     pub fn dim (&mut self, index: usize) -> (usize, usize) {
-        let (x1, x2, y1, y2, _) = self.memory
+        let (x1, x2, y1, y2, _) = self.metadata
             .get(index)
-            .expect(&format!("Invalid index {} in arr2_to_tensor::dim", index));
+            .expect(&format!("Invalid index {} in PackedTensor2D::dim", index));
         (x2-x1+1, y2-y1+1)
     }
     
     pub fn len(&self) -> usize {
-        self.memory.coords.len()
+        self.metadata.coords.len()
     }
 
-    pub fn save(&self, path: &str) {
-        let _ = save_checkpoint(path, &ckpt_tensor3 {
-            array: self.data_array3_fix.clone(),
-            coords: self.memory.coords.clone(),
-            x_max: self.memory.x_max,
-            y_max: self.memory.y_max,
-        });
+    pub fn print_coords (&self) {
+        self.metadata.print();
     }
 
-    pub fn load(path: &str) -> Self {
-        let arr = load_checkpoint(path).expect("Failed to load checkpoint");
-        let mut mem = MemoryOrdo2::init();
-        mem.coords = arr.coords;
-        mem.x_max = arr.x_max;
-        mem.y_max = arr.y_max;
-        Self {
-            memory: mem,
+    pub fn export (self) -> PackedTensor2DStorage {
+        PackedTensor2DStorage{data: self.data_array3, metadata: self.metadata}
+    }
+
+    pub fn import (data:PackedTensor2DStorage) -> Self {
+        Self { metadata: data.metadata,
             data_array2: Vec::new(),
-            data_array2_fix: Vec::new(),
-            data_array3_fix: arr.array,
-            true_index: Vec::new(),
-        }
+            data_array3: data.data,
+            true_index: Vec::new() }
     }
+
 }
