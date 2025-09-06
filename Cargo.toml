@@ -1,11 +1,7 @@
 [package]
-name = "marge_array"
-version = "0.1.0"
+name = "TensorClerum"
+version = "0.1.1"
 edition = "2024"
 
 [dependencies]
 ndarray = { version = "0.16.1", features = ["serde"] }
-rand_distr = "0.5.1"
-rand = "0.9.2"
-bincode = "1.3"
-serde = { version = "1", features = ["derive"] }
