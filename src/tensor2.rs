@@ -399,6 +399,12 @@ impl PackedTensor2D {
         self.metadata.coords.len()
     }
 
+    pub fn copy_and_fill(&self, num:f32) -> PackedTensor2D {
+        let mut data = self.clone();
+        data.data_array3.fill(num);
+        data
+    }
+
     pub fn print_coords (&self) {
         self.metadata.print();
     }

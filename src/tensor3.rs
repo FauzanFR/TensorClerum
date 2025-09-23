@@ -379,6 +379,12 @@ impl PackedTensor3D {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+    
+    pub fn copy_and_fill(&self, num:f32) -> PackedTensor3D {
+        let mut data = self.clone();
+        data.data_array4.fill(num);
+        data
+    }
 
     pub fn print_coords(&self) {
         self.metadata.print();
