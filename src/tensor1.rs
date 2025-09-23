@@ -140,9 +140,7 @@ impl PackedTensor1D {
                     self.metadata.coords.push((self.true_index[idx], self.metadata.x_max-free_space, 0 + self.metadata.x_max-free_space+n-1, layer_id));
                     free_space -= n;
                     placed_idx.push(idx);
-                } else {
-                    break
-                }
+                } 
             }
 
             layer_id += 1;
