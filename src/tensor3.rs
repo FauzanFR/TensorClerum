@@ -1,6 +1,7 @@
 use ndarray::{s, stack, Array3, Array4, ArrayView3, ArrayViewMut3, Axis};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 struct BoundingBox {
     min: [usize; 3],
     max: [usize; 3],
@@ -32,7 +33,7 @@ impl BoundingBox {
     }
 }
 
-#[derive(Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 struct OctreeNode {
     bounds: BoundingBox,
     children: Option<[Box<OctreeNode>; 8]>,
@@ -112,7 +113,7 @@ impl OctreeNode {
     }
 }
 
-#[derive(Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 struct Tensor3Metadata {
     x_max: usize,
     x_min: usize,
@@ -187,6 +188,7 @@ impl Tensor3Metadata {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone)]
 pub struct PackedTensor3DStorage {
     data: Array4<f32>, 
     metadata: Tensor3Metadata
@@ -380,6 +382,10 @@ impl PackedTensor3D {
         self.len() == 0
     }
     
+    pub fn fill_all(&mut self, num:f32){
+        self.data_array4.fill(num)
+    }
+
     pub fn copy_and_fill(&self, num:f32) -> PackedTensor3D {
         let mut data = self.clone();
         data.data_array4.fill(num);

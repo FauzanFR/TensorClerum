@@ -1,4 +1,5 @@
 use ndarray::{s, stack, Array2, Array3, ArrayView2, ArrayViewMut2, Axis};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct Rect {
@@ -176,7 +177,7 @@ impl MaxRectsBin {
     }
 }
 
-#[derive(Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 struct Tensor2Metadata {
     x_max: usize,
     x_min: usize,
@@ -185,6 +186,7 @@ struct Tensor2Metadata {
     coords: Vec<(usize, usize, usize, usize, usize, usize)>,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
 pub struct PackedTensor2DStorage {
     data: Array3<f32>, 
     metadata:Tensor2Metadata
@@ -397,6 +399,10 @@ impl PackedTensor2D {
     
     pub fn len(&self) -> usize {
         self.metadata.coords.len()
+    }
+
+    pub fn fill_all(&mut self, num:f32){
+        self.data_array3.fill(num)
     }
 
     pub fn copy_and_fill(&self, num:f32) -> PackedTensor2D {

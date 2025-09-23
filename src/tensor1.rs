@@ -1,5 +1,7 @@
 use ndarray::{s, stack, Array1, Array2, ArrayView1, ArrayViewMut1, Axis};
-#[derive(Clone)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Clone)]
 struct Tensor1Metadata {
     x_max: usize,
     x_min: usize,
@@ -31,6 +33,7 @@ impl Tensor1Metadata {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone)]
 pub struct PackedTensor1DStorage {
     data: Array2<f32>, 
     metadata:Tensor1Metadata
@@ -180,6 +183,10 @@ impl PackedTensor1D {
 
     pub fn len(&self) -> usize {
         self.metadata.coords.len()
+    }
+
+    pub fn fill_all(&mut self, num:f32){
+        self.data_array2.fill(num)
     }
 
     pub fn copy_and_fill(&self, num:f32) -> PackedTensor1D {
